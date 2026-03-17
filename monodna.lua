@@ -63,7 +63,7 @@ local function build_steps()
     local drift       = rnd(-chaos * 0.4, chaos * 0.4)
     local amp         = rnd(lerp(0.8, 0.2, chaos), 1.0)
     local cutoff_mult = rnd(1.0, lerp(2.0, 10.0, chaos))
-    local rel         = rnd(0.05, lerp(0.3, 1.5, chaos))
+    local release     = rnd(0.05, lerp(0.3, 1.5, chaos))
     local is_rest     = math.random() < (chaos * 0.25)
     local dur_choices = {0.5, 1, 1, 1, 1, 1.5, 2}
     local dur_mult    = dur_choices[rnd_int(1, #dur_choices)]
@@ -74,7 +74,7 @@ local function build_steps()
       drift        = drift,
       amp          = amp,
       cutoff_mult  = cutoff_mult,
-      rel          = rel,
+      release      = release,
       is_rest      = is_rest,
       dur_mult     = dur_mult,
     }
@@ -87,11 +87,12 @@ end
 
 local function play_step(s)
   if s.is_rest then return end
+
   local midi_note = math.max(24, math.min(108, dna.root + s.oct_offset))
   local freq      = mtof(midi_note) * (2 ^ (s.drift / 12))
   local cutoff    = math.min(freq * s.cutoff_mult, 8000)
 
-  engine.release(s.rel)
+  engine.release(s.release)
   engine.cutoff(cutoff)
   engine.amp(s.amp * 0.8)
   engine.hz(freq)
@@ -135,11 +136,12 @@ function key(n, z)
   if z == 1 then
     if n == 2 then
       randomize_dna()
+      redraw()
     elseif n == 3 then
       frozen = not frozen
+      redraw()
     end
   end
-  redraw()
 end
 
 function enc(n, d)
@@ -171,7 +173,6 @@ function redraw()
   screen.clear()
   screen.aa(1)
 
-  -- title
   screen.level(15)
   screen.font_face(1)
   screen.font_size(8)
@@ -196,7 +197,7 @@ function redraw()
   screen.move(68, 42)
   screen.text(string.format("%d bpm", dna.rate))
 
-  -- intensity bar
+  -- intensity label + bar
   screen.level(5)
   screen.move(68, 26)
   screen.text("chaos")
@@ -206,7 +207,8 @@ function redraw()
 
   -- step dots
   local total_w = 124
-  local sw = math.max(2, math.floor(total_w / dna.steps) - 1)
+  local sw = math.floor(total_w / dna.steps) - 1
+  sw = math.max(2, sw)
   for i = 1, dna.steps do
     local s = steps[i]
     local x = 2 + (i - 1) * (sw + 1)
@@ -226,7 +228,6 @@ function redraw()
     end
   end
 
-  -- seed / steps info
   screen.level(3)
   screen.font_size(8)
   screen.move(2, 64)
@@ -242,7 +243,7 @@ end
 function init()
   math.randomseed(os.time())
 
-  -- PolyPerc valid params: amp, cutoff, gain, hz, pan, pw, release
+  -- PolyPerc valid commands: amp, cutoff, gain, hz, pan, pw, release
   engine.amp(0.8)
   engine.cutoff(2000)
   engine.release(0.3)
@@ -259,7 +260,7 @@ function init()
     params:set("clock_tempo", v)
   end)
   params:add_control("intensity", "Intensity",
-    controlspec.new(0, 1, "lin", 0.01, dna.intensity, ""))
+    controlspec.new(0, 1, "lin", 0.01, 0.5, ""))
   params:set_action("intensity", function(v)
     dna.intensity = v
     build_steps()
@@ -270,7 +271,7 @@ function init()
 
   beat_clock = clock.run(run_arp)
   redraw()
-  print("MONODNA ready — one note, infinite variation")
+  print("MONODNA: running")
 end
 
 function cleanup()
