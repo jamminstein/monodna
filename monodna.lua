@@ -24,6 +24,32 @@ local dna = {
   seed      = 1337,
 }
 
+-- Scale quantization
+local scale_lock = 1           -- 1=chromatic, 2=pentatonic, 3=dorian, 4=mixolydian, 5=blues
+local scale_names = {"chromatic", "pentatonic", "dorian", "mixolydian", "blues"}
+local scales = {
+  chromatic    = {0,1,2,3,4,5,6,7,8,9,10,11},
+  pentatonic   = {0,2,4,7,9},
+  dorian       = {0,2,3,5,7,9,10},
+  mixolydian   = {0,2,4,5,7,9,10},
+  blues        = {0,3,5,6,7,10},
+}
+
+-- Mutation history & undo
+local history = {}
+local history_max = 8
+local history_idx = 1
+
+-- Mutation locks per parameter
+local mutation_locks = {
+  oct_offset = false,
+  drift = false,
+  amp = false,
+  cutoff_mult = false,
+  release = false,
+  dur_mult = false,
+}
+
 local steps = {}
 local step_idx = 0
 
@@ -47,6 +73,20 @@ local function rnd_int(lo, hi)
   return math.floor(rnd(lo, hi + 0.9999))
 end
 
+local function quantize_to_scale(value, scale_tbl)
+  if not scale_tbl or #scale_tbl == 0 then return value end
+  local idx = 1
+  local min_dist = math.abs(value - scale_tbl[1])
+  for i = 2, #scale_tbl do
+    local dist = math.abs(value - scale_tbl[i])
+    if dist < min_dist then
+      min_dist = dist
+      idx = i
+    end
+  end
+  return scale_tbl[idx]
+end
+
 -- -------------------------------------------------------
 -- build steps from DNA
 -- -------------------------------------------------------
@@ -55,19 +95,35 @@ local function build_steps()
   math.randomseed(dna.seed)
   local n = dna.steps
   local chaos = dna.intensity
+  local scale_tbl = scales[scale_names[scale_lock]]
+
+  -- Save current state to history before mutation
+  local prev_steps = {}
+  for i = 1, #steps do
+    prev_steps[i] = {}
+    for k, v in pairs(steps[i]) do prev_steps[i][k] = v end
+  end
+  history[history_idx] = prev_steps
+  history_idx = (history_idx % history_max) + 1
 
   steps = {}
   for i = 1, n do
     local oct_range   = math.floor(lerp(0, 3, chaos))
-    local oct_offset  = rnd_int(-oct_range, oct_range) * 12
-    local drift       = rnd(-chaos * 0.4, chaos * 0.4)
-    local amp         = rnd(lerp(0.8, 0.2, chaos), 1.0)
-    local cutoff_mult = rnd(1.0, lerp(2.0, 10.0, chaos))
-    local release     = rnd(0.05, lerp(0.3, 1.5, chaos))
+    local oct_offset  = mutation_locks.oct_offset and (steps[i] and steps[i].oct_offset or 0) or rnd_int(-oct_range, oct_range) * 12
+    local drift       = mutation_locks.drift and (steps[i] and steps[i].drift or 0) or rnd(-chaos * 0.4, chaos * 0.4)
+    local amp         = mutation_locks.amp and (steps[i] and steps[i].amp or 0.8) or rnd(lerp(0.8, 0.2, chaos), 1.0)
+    local cutoff_mult = mutation_locks.cutoff_mult and (steps[i] and steps[i].cutoff_mult or 1.0) or rnd(1.0, lerp(2.0, 10.0, chaos))
+    local release     = mutation_locks.release and (steps[i] and steps[i].release or 0.3) or rnd(0.05, lerp(0.3, 1.5, chaos))
     local is_rest     = math.random() < (chaos * 0.25)
     local dur_choices = {0.5, 1, 1, 1, 1, 1.5, 2}
-    local dur_mult    = dur_choices[rnd_int(1, #dur_choices)]
+    local dur_mult    = mutation_locks.dur_mult and (steps[i] and steps[i].dur_mult or 1) or dur_choices[rnd_int(1, #dur_choices)]
     if chaos < 0.3 then dur_mult = 1 end
+
+    -- Quantize drift to scale if not chromatic
+    if scale_lock > 1 then
+      local drift_semitones = math.floor(drift)
+      drift = quantize_to_scale(drift_semitones, scale_tbl) - (drift_semitones % 12)
+    end
 
     steps[i] = {
       oct_offset   = oct_offset,
@@ -119,7 +175,7 @@ local function run_arp()
 end
 
 -- -------------------------------------------------------
--- DNA mutation
+-- DNA mutation & history
 -- -------------------------------------------------------
 
 local function randomize_dna()
@@ -127,6 +183,23 @@ local function randomize_dna()
   dna.steps = rnd_int(4, 16)
   build_steps()
 end
+
+local function undo_mutation()
+  if #history == 0 then print("MONODNA: no history"); return end
+  history_idx = history_idx - 1
+  if history_idx < 1 then history_idx = history_max end
+  if history[history_idx] then
+    steps = {}
+    for i = 1, #history[history_idx] do
+      steps[i] = {}
+      for k, v in pairs(history[history_idx][i]) do steps[i][k] = v end
+    end
+  end
+end
+
+-- MIDI CC learn state
+local cc_learn_enabled = false
+local cc_learn_param = nil
 
 -- -------------------------------------------------------
 -- norns keys & encoders
@@ -167,6 +240,20 @@ local function midi_to_name(m)
   local n = (m % 12) + 1
   local o = math.floor(m / 12) - 1
   return note_names[n] .. o
+end
+
+-- -------------------------------------------------------
+-- MIDI CC event handling
+-- -------------------------------------------------------
+function midi.event(data)
+  local msg = midi.to_msg(data)
+  if msg.type == "cc" then
+    -- CC 14: mutation rate via CC
+    if msg.cc == 14 then
+      dna.intensity = util.clamp(msg.val / 127, 0, 1)
+      build_steps()
+    end
+  end
 end
 
 function redraw()
@@ -265,6 +352,25 @@ function init()
     dna.intensity = v
     build_steps()
   end)
+
+  params:add_separator("MUTATIONS")
+  params:add_option("scale_lock", "Scale Lock", scale_names, scale_lock)
+  params:set_action("scale_lock", function(v)
+    scale_lock = v
+    build_steps()
+  end)
+
+  params:add_toggle("lock_oct", "Lock Octave Offset", mutation_locks.oct_offset)
+  params:set_action("lock_oct", function(v) mutation_locks.oct_offset = v end)
+
+  params:add_toggle("lock_drift", "Lock Pitch Drift", mutation_locks.drift)
+  params:set_action("lock_drift", function(v) mutation_locks.drift = v end)
+
+  params:add_toggle("lock_amp", "Lock Amplitude", mutation_locks.amp)
+  params:set_action("lock_amp", function(v) mutation_locks.amp = v end)
+
+  params:add_toggle("lock_cutoff", "Lock Cutoff", mutation_locks.cutoff_mult)
+  params:set_action("lock_cutoff", function(v) mutation_locks.cutoff_mult = v end)
 
   build_steps()
   params:set("clock_tempo", dna.rate)
