@@ -13,6 +13,11 @@
 
 engine.name = "PolyPerc"
 
+local midi_out, opxy_out = nil, nil
+
+local function opxy_note_on(note, vel) if opxy_out then opxy_out:note_on(note, vel, params:get("opxy_channel")) end end
+local function opxy_note_off(note) if opxy_out then opxy_out:note_off(note, 0, params:get("opxy_channel")) end end
+
 local frozen = false
 local beat_clock = nil
 local running = true
@@ -153,6 +158,14 @@ local function play_step(s)
   engine.cutoff(cutoff)
   engine.amp(s.amp * 0.8)
   engine.hz(freq)
+  local vel = math.floor(s.amp * 0.8 * 127)
+  if midi_out then midi_out:note_on(midi_note, vel, params:get("midi_channel")) end
+  opxy_note_on(midi_note, vel)
+  clock.run(function()
+    clock.sleep(s.release)
+    if midi_out then midi_out:note_off(midi_note, 0, params:get("midi_channel")) end
+    opxy_note_off(midi_note)
+  end)
 end
 
 -- -------------------------------------------------------
@@ -376,6 +389,15 @@ function init()
   build_steps()
   params:set("clock_tempo", dna.rate)
 
+  params:add_separator("MIDI Out")
+  params:add{type="number", id="midi_device", name="MIDI Device", min=1, max=16, default=1, action=function(v) midi_out = midi.connect(v) end}
+  params:add{type="number", id="midi_channel", name="MIDI Channel", min=1, max=16, default=1}
+  params:add_separator("OP-XY MIDI")
+  params:add{type="number", id="opxy_device", name="OP-XY Device", min=1, max=16, default=2, action=function(v) opxy_out = midi.connect(v) end}
+  params:add{type="number", id="opxy_channel", name="OP-XY Channel", min=1, max=16, default=1}
+  midi_out = midi.connect(params:get("midi_device"))
+  opxy_out = midi.connect(params:get("opxy_device"))
+
   beat_clock = clock.run(run_arp)
   redraw()
   print("MONODNA: running")
@@ -384,4 +406,6 @@ end
 function cleanup()
   running = false
   if beat_clock then clock.cancel(beat_clock) end
+  if midi_out then for ch=1,16 do midi_out:cc(123,0,ch) end end
+  if opxy_out then for ch=1,16 do opxy_out:cc(123,0,ch) end end
 end
