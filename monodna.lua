@@ -274,62 +274,90 @@ function redraw()
   screen.clear()
   screen.aa(1)
 
-  screen.level(15)
-  screen.font_face(1)
+  -- ── Title + frozen state ──
+  screen.level(frozen and 5 or 15)
+  screen.font_face(7)
   screen.font_size(8)
   screen.move(2, 9)
   screen.text("MONODNA")
 
   if frozen then
-    screen.level(5)
-    screen.move(88, 9)
-    screen.text("FROZEN")
+    screen.level(8)
+    screen.move(126, 9)
+    screen.text_right("FROZEN")
   end
 
-  -- big root note
+  -- ── Big root note ──
   screen.level(15)
+  screen.font_face(7)
   screen.font_size(28)
   screen.move(2, 42)
   screen.text(midi_to_name(dna.root))
 
-  -- BPM
+  -- ── Scale lock indicator ──
+  screen.level(4)
+  screen.font_face(1)
+  screen.font_size(8)
+  screen.move(126, 20)
+  screen.text_right(scale_names[scale_lock])
+
+  -- ── BPM ──
+  screen.font_face(1)
   screen.font_size(8)
   screen.level(10)
   screen.move(68, 42)
   screen.text(string.format("%d bpm", dna.rate))
 
-  -- intensity label + bar
-  screen.level(5)
+  -- ── Chaos bar with gradient fill ──
+  screen.level(3)
   screen.move(68, 26)
   screen.text("chaos")
-  screen.level(15)
-  screen.rect(68, 29, math.floor(dna.intensity * 56), 4)
-  screen.fill()
+  -- Bar background
+  screen.level(2)
+  screen.rect(68, 29, 56, 5)
+  screen.stroke()
+  -- Bar fill
+  local bar_w = math.floor(dna.intensity * 56)
+  if bar_w > 0 then
+    screen.level(math.floor(5 + dna.intensity * 10))
+    screen.rect(68, 29, bar_w, 5)
+    screen.fill()
+  end
 
-  -- step dots
+  -- ── Step sequence visualization ──
+  -- Height encodes octave offset, brightness encodes amplitude
   local total_w = 124
   local sw = math.floor(total_w / dna.steps) - 1
   sw = math.max(2, sw)
   for i = 1, dna.steps do
     local s = steps[i]
     local x = 2 + (i - 1) * (sw + 1)
-    if i == step_idx then
-      screen.level(15)
-      screen.rect(x, 50, sw, 8)
-      screen.fill()
-    elseif s and s.is_rest then
-      screen.level(2)
-      screen.rect(x, 50, sw, 8)
-      screen.stroke()
-    else
-      local lv = s and math.max(3, 10 - math.abs(s.oct_offset / 12) * 2) or 6
-      screen.level(math.floor(lv))
-      screen.rect(x, 50, sw, 8)
-      screen.fill()
+    if s then
+      -- Height varies with octave offset (taller = higher octave)
+      local base_h = 8
+      local h = math.max(2, base_h + math.floor(s.oct_offset / 12) * 2)
+      local y = 58 - h
+
+      if i == step_idx then
+        screen.level(15)
+        screen.rect(x, y, sw, h)
+        screen.fill()
+      elseif s.is_rest then
+        screen.level(2)
+        screen.rect(x, 56, sw, 2)
+        screen.stroke()
+      else
+        local lv = math.max(3, math.floor(s.amp * 12))
+        screen.level(lv)
+        screen.rect(x, y, sw, h)
+        screen.fill()
+      end
     end
   end
 
+  -- ── Bottom info ──
   screen.level(3)
+  screen.font_face(1)
   screen.font_size(8)
   screen.move(2, 64)
   screen.text(string.format("%d steps  seed:%05d", dna.steps, dna.seed))
