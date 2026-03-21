@@ -15,6 +15,7 @@ engine.name = "PolyPerc"
 
 local frozen = false
 local beat_clock = nil
+local running = true
 
 local dna = {
   root      = 48,
@@ -163,7 +164,7 @@ local function step_dur()
 end
 
 local function run_arp()
-  while true do
+  while running do
     step_idx = (step_idx % dna.steps) + 1
     local s = steps[step_idx]
     if not frozen then
@@ -381,5 +382,6 @@ function init()
 end
 
 function cleanup()
+  running = false
   if beat_clock then clock.cancel(beat_clock) end
 end
