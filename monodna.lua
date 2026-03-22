@@ -289,10 +289,11 @@ function redraw()
 
   -- ── Big root note ──
   screen.level(15)
-  screen.font_face(1)
-  screen.font_size(28)
-  screen.move(2, 42)
+  screen.font_face(25)
+  screen.font_size(20)
+  screen.move(2, 40)
   screen.text(midi_to_name(dna.root))
+  screen.font_face(1)
 
   -- ── Scale lock indicator ──
   screen.level(4)
