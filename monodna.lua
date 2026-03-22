@@ -272,11 +272,11 @@ end
 
 function redraw()
   screen.clear()
-  screen.aa(1)
+  screen.aa(0)
 
   -- ── Title + frozen state ──
   screen.level(frozen and 5 or 15)
-  screen.font_face(7)
+  screen.font_face(1)
   screen.font_size(8)
   screen.move(2, 9)
   screen.text("MONODNA")
@@ -289,7 +289,7 @@ function redraw()
 
   -- ── Big root note ──
   screen.level(15)
-  screen.font_face(7)
+  screen.font_face(1)
   screen.font_size(28)
   screen.move(2, 42)
   screen.text(midi_to_name(dna.root))
